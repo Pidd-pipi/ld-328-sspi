@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 
+	"github.com/blueship581/cyfreshfood/internal/constants"
 	"github.com/blueship581/cyfreshfood/internal/model"
 	"github.com/blueship581/cyfreshfood/internal/util"
 	"gorm.io/gorm"
@@ -81,6 +82,22 @@ func (r *FoodItemRepository) Update(item *model.FoodItem) error { return r.db.Sa
 // UpdateStatus 更新新鲜度状态。
 func (r *FoodItemRepository) UpdateStatus(id uint, status string) error {
 	return r.db.Model(&model.FoodItem{}).Where("id = ?", id).Update("status", status).Error
+}
+
+// DeductQuantity 原子条件扣减余量（处置批准专用）：
+// 仅当食品未消耗且余量充足时扣减；余量归零同时把状态置为 consumed。
+// 返回 RowsAffected：0 表示超量或已消耗（并发批准失败方不得改库存）。
+func (r *FoodItemRepository) DeductQuantity(id uint, quantity float64) (int64, error) {
+	res := r.db.Model(&model.FoodItem{}).
+		Where("id = ? AND status <> ? AND quantity >= ?", id, constants.FreshnessConsumed, quantity).
+		Updates(map[string]any{
+			"quantity": gorm.Expr("quantity - ?", quantity),
+			"status": gorm.Expr(
+				"CASE WHEN quantity - ? <= 0 THEN ? ELSE status END",
+				quantity, constants.FreshnessConsumed,
+			),
+		})
+	return res.RowsAffected, res.Error
 }
 
 // Delete 删除食品。

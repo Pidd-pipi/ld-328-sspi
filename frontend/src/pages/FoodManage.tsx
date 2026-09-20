@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Upload, message } from 'antd';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { useNavigate } from 'react-router-dom';
 import { useFamilyStore } from '../stores/familyStore';
 import { consumeFood, createFood, deleteFood, getFoodDetail, importFoodsCSV, listFoods, updateFood } from '../api/foodItem';
+import { createDisposal, listDisposals } from '../api/disposal';
 import type { ConsumptionRecord, FoodItem } from '../types';
 import FreshnessBadge from '../components/common/FreshnessBadge';
 import RemainingDaysBar from '../components/common/RemainingDaysBar';
-import { FoodCategories, FoodCategoryLabels, StorageLocationLabels } from '../constants/food';
+import { DisposalMethods, DisposalMethodLabels, DisposableFreshnessStatuses, FoodCategories, FoodCategoryLabels, FreshnessStatusLabels, StorageLocationLabels } from '../constants/food';
+import { computeFreshness } from '../utils/calculateRemainingDays';
 import { formatDateTime } from '../utils/dateFormat';
 import { usePagination } from '../hooks/usePagination';
 import { useFoodStore } from '../stores/foodStore';
@@ -16,18 +19,26 @@ export default function FoodManage() {
   const { currentFamily } = useFamilyStore();
   const { items, total, loading, fetchList } = useFoodStore();
   const { pagination, setTotal, onPageChange } = usePagination(1, 10);
+  const navigate = useNavigate();
   const [filters, setFilters] = useState({ category: '', status: '', storage_location: '', keyword: '' });
   const [form] = Form.useForm();
+  const [disposalForm] = Form.useForm();
   const [editing, setEditing] = useState<FoodItem | null>(null);
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<{ item: FoodItem; consumption_records: ConsumptionRecord[] } | null>(null);
   const [consumeQty, setConsumeQty] = useState(1);
   const [csvText, setCsvText] = useState('');
+  // 已有待处理处置申请的食品 id 集合（同一食品仅允许一张待处理申请）
+  const [pendingDisposalFoodIds, setPendingDisposalFoodIds] = useState<Set<number>>(new Set());
+  const [disposalTarget, setDisposalTarget] = useState<FoodItem | null>(null);
 
   const load = useCallback(async (page = pagination.page, size = pagination.pageSize) => {
     if (!currentFamily) return;
     const data = await fetchList({ family_id: currentFamily.id, page, page_size: size, ...filters });
     setTotal(data.total);
+    listDisposals({ family_id: currentFamily.id, status: 'pending', page: 1, page_size: 200 })
+      .then((res) => setPendingDisposalFoodIds(new Set(res.list.map((a) => a.food_item_id))))
+      .catch(() => undefined);
   }, [currentFamily, filters, fetchList, pagination.page, pagination.pageSize, setTotal]);
 
   useEffect(() => { load(); }, [load]);
@@ -57,6 +68,20 @@ export default function FoodManage() {
     load();
   }
 
+  async function onDisposal(values: { quantity: number; method: string }) {
+    if (!disposalTarget) return;
+    await createDisposal({ food_item_id: disposalTarget.id, quantity: values.quantity, method: values.method });
+    message.success('临期处置申请已提交，等待家庭管理员审批');
+    setDisposalTarget(null);
+    disposalForm.resetFields();
+    load();
+  }
+
+  // 仅临期 / 已过期（且未消耗）食品可发起处置
+  function isDisposable(item: FoodItem): boolean {
+    return DisposableFreshnessStatuses.includes(computeFreshness(item.status, item.expiry_date));
+  }
+
   async function onDelete(item: FoodItem) {
     await deleteFood(item.id);
     message.success('删除成功');
@@ -75,6 +100,13 @@ export default function FoodManage() {
         <a onClick={() => getFoodDetail(r.id).then(setDetail)}>详情</a>
         <a onClick={() => { setEditing(r); form.setFieldsValue(r); setOpen(true); }}>编辑</a>
         <a onClick={() => { setDetail({ item: r, consumption_records: [] }); setConsumeQty(1); }}>消耗</a>
+        {isDisposable(r) && (
+          pendingDisposalFoodIds.has(r.id) ? (
+            <a onClick={() => navigate('/disposals')}>处置申请中</a>
+          ) : (
+            <a onClick={() => { disposalForm.resetFields(); disposalForm.setFieldsValue({ quantity: 1, method: 'discard' }); setDisposalTarget(r); }}>临期处置</a>
+          )
+        )}
         <a style={{ color: '#ff4d4f' }} onClick={() => Modal.confirm({ title: '确认删除？', onOk: () => onDelete(r) })}>删除</a>
       </Space>
     ) },
@@ -132,6 +164,36 @@ export default function FoodManage() {
 
       <Modal open={!!csvText} title="CSV 批量导入" onOk={onImport} onCancel={() => setCsvText('')} okText="导入">
         <Input.TextArea rows={8} value={csvText} onChange={(e) => setCsvText(e.target.value)} placeholder="name,category,quantity,unit,shelf_life_days,storage_location" />
+      </Modal>
+
+      <Modal
+        open={!!disposalTarget}
+        title={`临期处置申请 - ${disposalTarget?.name ?? ''}`}
+        onOk={() => disposalForm.submit()}
+        onCancel={() => setDisposalTarget(null)}
+        okText="提交申请"
+        destroyOnClose
+      >
+        {disposalTarget && (
+          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <div>
+              当前状态：<FreshnessBadge status={disposalTarget.status} expiryDate={disposalTarget.expiry_date} />
+              {'　'}余量：{disposalTarget.quantity} {disposalTarget.unit}
+            </div>
+            <span style={{ color: '#999' }}>
+              仅临期（{FreshnessStatusLabels.expiring}）或已过期食品可申请；提交后由家庭管理员批准，批准时扣减余量并生成消耗记录。
+            </span>
+            <Form form={disposalForm} layout="vertical" onFinish={onDisposal} preserve={false}
+              initialValues={{ quantity: 1, method: 'discard' }}>
+              <Form.Item name="quantity" label="处置数量" rules={[{ required: true, type: 'number', min: 0.0001, max: disposalTarget.quantity }]}>
+                <InputNumber min={0.0001} max={disposalTarget.quantity} step={1} style={{ width: '100%' }} addonAfter={disposalTarget.unit} />
+              </Form.Item>
+              <Form.Item name="method" label="处置方式" rules={[{ required: true }]}>
+                <Select options={DisposalMethods.map((m) => ({ value: m, label: DisposalMethodLabels[m] }))} />
+              </Form.Item>
+            </Form>
+          </Space>
+        )}
       </Modal>
     </Space>
   );

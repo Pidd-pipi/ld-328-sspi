@@ -56,6 +56,24 @@ export interface ConsumptionRecord {
   food_item?: FoodItem;
 }
 
+export interface DisposalApplication {
+  id: number;
+  family_id: number;
+  food_item_id: number;
+  applicant_id: number;
+  quantity: number;
+  method: string;
+  status: string;
+  reviewer_id?: number | null;
+  review_note?: string;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  applicant?: User;
+  reviewer?: User | null;
+  food_item?: FoodItem;
+}
+
 export interface Notification {
   id: number;
   family_id: number;

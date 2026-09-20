@@ -39,6 +39,13 @@ func main() {
 	if err := migrateAndSeed(db, log); err != nil {
 		panic(fmt.Errorf("migrate database: %w", err))
 	}
+	if err := db.AutoMigrate(&model.DisposalApplication{}); err != nil {
+		panic(fmt.Errorf("migrate disposal applications: %w", err))
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_disposal_pending_food
+		ON disposal_applications(food_item_id) WHERE status = 'pending'`).Error; err != nil {
+		panic(fmt.Errorf("create disposal pending index: %w", err))
+	}
 	log.Info(constants.LOG_DB_INITIALIZED)
 
 	rdb := redis.NewClient(&redis.Options{Addr: cfg.RedisAddr(), Password: cfg.RedisPassword})
@@ -54,6 +61,7 @@ func main() {
 	memberRepo := repository.NewFamilyMemberRepository(db)
 	foodRepo := repository.NewFoodItemRepository(db)
 	consumeRepo := repository.NewConsumptionRecordRepository(db)
+	disposalRepo := repository.NewDisposalApplicationRepository(db)
 	notifyRepo := repository.NewNotificationRepository(db)
 	recipeRepo := repository.NewRecipeRepository(db)
 
@@ -62,6 +70,7 @@ func main() {
 	memberSvc := service.NewFamilyMemberService(memberRepo, log)
 	foodSvc := service.NewFoodItemService(foodRepo, consumeRepo, familySvc, calculator, log)
 	consumeSvc := service.NewConsumptionRecordService(consumeRepo, foodRepo, familySvc, log)
+	disposalSvc := service.NewDisposalApplicationService(disposalRepo, foodRepo, consumeRepo, familySvc, calculator, log)
 	notifySvc := service.NewNotificationService(notifyRepo, familySvc, log)
 	recipeSvc := service.NewRecipeService(recipeRepo, foodRepo, familySvc, calculator, log)
 	statsSvc := service.NewStatsService(foodRepo, consumeRepo, notifyRepo, familySvc, memberSvc, calculator, log)
@@ -79,6 +88,7 @@ func main() {
 		FamilyGroup:  handler.NewFamilyGroupHandler(familySvc, memberSvc, log),
 		FoodItem:     handler.NewFoodItemHandler(foodSvc, consumeSvc, log),
 		Consumption:  handler.NewConsumptionRecordHandler(consumeSvc, log),
+		Disposal:     handler.NewDisposalApplicationHandler(disposalSvc, log),
 		Notification: handler.NewNotificationHandler(notifySvc, log),
 		Recipe:       handler.NewRecipeHandler(recipeSvc, log),
 		Stats:        handler.NewStatsHandler(statsSvc, log),
@@ -117,7 +127,12 @@ func migrateAndSeed(db *gorm.DB, log *slog.Logger) error {
 	if err := db.AutoMigrate(
 		&model.User{}, &model.FamilyGroup{}, &model.FamilyMember{},
 		&model.FoodItem{}, &model.ConsumptionRecord{}, &model.Notification{}, &model.Recipe{},
+		&model.DisposalApplication{},
 	); err != nil {
+		return err
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_disposal_pending_food
+		ON disposal_applications(food_item_id) WHERE status = 'pending'`).Error; err != nil {
 		return err
 	}
 	var count int64

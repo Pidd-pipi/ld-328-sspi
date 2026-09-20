@@ -63,6 +63,29 @@ CREATE TABLE IF NOT EXISTS consumption_records (
 );
 CREATE INDEX IF NOT EXISTS idx_consume_food ON consumption_records(food_item_id);
 
+-- 临期处置申请：家庭成员对临期/过期食品提交处置闭环；同一食品仅允许一张待处理申请
+CREATE TABLE IF NOT EXISTS disposal_applications (
+    id BIGSERIAL PRIMARY KEY,
+    family_id BIGINT NOT NULL,
+    food_item_id BIGINT NOT NULL,
+    applicant_id BIGINT NOT NULL,
+    quantity DOUBLE PRECISION NOT NULL,
+    method VARCHAR(20) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pending',
+    reviewer_id BIGINT,
+    review_note VARCHAR(255) DEFAULT '',
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT fk_disposal_family FOREIGN KEY (family_id) REFERENCES family_groups(id),
+    CONSTRAINT fk_disposal_food FOREIGN KEY (food_item_id) REFERENCES food_items(id),
+    CONSTRAINT fk_disposal_applicant FOREIGN KEY (applicant_id) REFERENCES users(id),
+    CONSTRAINT fk_disposal_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS idx_disposal_family_status ON disposal_applications(family_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_disposal_pending_food
+    ON disposal_applications(food_item_id) WHERE status = 'pending';
+
 CREATE TABLE IF NOT EXISTS notifications (
     id BIGSERIAL PRIMARY KEY,
     family_id BIGINT NOT NULL,

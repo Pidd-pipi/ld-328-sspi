@@ -100,5 +100,33 @@ func RoleText(role string) string {
 	}
 }
 
+// DisposalMethodText 临期处置方式中文文案。
+func DisposalMethodText(method string) string {
+	switch method {
+	case "discard":
+		return "丢弃"
+	case "eat":
+		return "食用"
+	case "donate":
+		return "捐赠"
+	default:
+		return "未知"
+	}
+}
+
+// DisposalStatusText 处置申请状态中文文案。
+func DisposalStatusText(status string) string {
+	switch status {
+	case "pending":
+		return "待处理"
+	case "approved":
+		return "已批准"
+	case "rejected":
+		return "已驳回"
+	default:
+		return "未知"
+	}
+}
+
 // JoinNames 拼接名称列表。
 func JoinNames(names []string) string { return strings.Join(names, "、") }

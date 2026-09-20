@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Layout, Menu, Badge, Dropdown, Avatar, Spin } from 'antd';
-import { DashboardOutlined, ShoppingOutlined, HistoryOutlined, BarChartOutlined, TeamOutlined, BulbOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons';
+import { DashboardOutlined, ShoppingOutlined, SolutionOutlined, HistoryOutlined, BarChartOutlined, TeamOutlined, BulbOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../stores/authStore';
 import { useFamilyStore } from '../stores/familyStore';
@@ -11,6 +11,7 @@ const { Header, Sider, Content } = Layout;
 const menuItems = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: '保质期看板' },
   { key: '/foods', icon: <ShoppingOutlined />, label: '食品管理' },
+  { key: '/disposals', icon: <SolutionOutlined />, label: '临期处置' },
   { key: '/consumptions', icon: <HistoryOutlined />, label: '消耗记录' },
   { key: '/statistics', icon: <BarChartOutlined />, label: '分类统计' },
   { key: '/family', icon: <TeamOutlined />, label: '家庭管理' },

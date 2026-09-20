@@ -2,7 +2,7 @@
 
 > 项目类型：全栈 Web 应用（农业与生活服务）
 
-面向家庭和小型餐饮的食品保质期管理工具，帮助用户记录食品入库信息、自动计算保质期剩余天数、及时提醒临期食品，减少食物浪费。支持家庭多成员共享、消耗记录、分类统计报表与智能食谱推荐。
+面向家庭和小型餐饮的食品保质期管理工具，帮助用户记录食品入库信息、自动计算保质期剩余天数、及时提醒临期食品，减少食物浪费。支持家庭多成员共享、**临期处置申请审批闭环**（成员申请丢弃/食用/捐赠，家庭管理员批准扣减库存并生成消耗记录）、消耗记录、分类统计报表与智能食谱推荐。
 
 ## 快速启动（Docker Compose 一键部署，首选）
 
@@ -22,6 +22,14 @@ docker compose ps
 - 前端：http://localhost:18628
 - 后端 API：http://localhost:19628
 - 健康检查：http://localhost:19628/healthz
+
+临期处置申请闭环（侧边栏「临期处置」）：
+
+1. 家庭成员在「食品管理」对**临期或已过期**食品提交处置申请（数量 + 丢弃/食用/捐赠）；同一食品只允许一张待处理申请。
+2. 申请数量超量或食品已消耗时，审批阶段**整单拒绝**，不修改任何库存。
+3. 仅**家庭管理员**可批准或驳回：批准时在同一事务内原子扣减余量、生成消耗记录并结案，余量归零自动标记食品为「已消耗」；驳回只关闭申请，不动库存。
+4. 并发批准通过条件更新（`WHERE status='pending'`）保证只有一次成功，失败方不改库存。
+5. 列表分页展示「待处理/已批准/已驳回/全部」，刷新后可回读。
 
 演示账号：
 
@@ -68,11 +76,11 @@ ld-328/
 │   ├── Dockerfile            # Node 构建 + Nginx 托管
 │   ├── nginx.conf            # SPA 路由 + /api 反代到 backend:8080
 │   └── src/
-│       ├── api/              # user/family/foodItem/consumption/notification/recipe/stats
-│       ├── stores/           # authStore/userStore/familyStore/foodStore/notificationStore
+│       ├── api/              # user/family/foodItem/consumption/disposal/notification/recipe/stats
+│       ├── stores/           # authStore/userStore/familyStore/foodStore/disposalStore/notificationStore
 │       ├── components/common/# FreshnessBadge/RemainingDaysBar/FoodCard/MemberAvatar/EmptyState/RoleGuard/ErrorBoundary
 │       ├── hooks/            # useFreshnessStats/usePagination
-│       ├── pages/            # Dashboard/FoodManage/ConsumptionManage/Statistics/FamilyManage/Recommendations/Profile/Login
+│       ├── pages/            # Dashboard/FoodManage/DisposalManage/ConsumptionManage/Statistics/FamilyManage/Recommendations/Profile/Login
 │       ├── router/           # index.tsx + guards.tsx
 │       ├── utils/            # calculateRemainingDays/dateFormat/request
 │       └── constants/        # food/user/errorCodes
@@ -80,14 +88,14 @@ ld-328/
     ├── cmd/server/main.go    # 入口：装配依赖、启动 Gin 与临期扫描
     └── internal/
         ├── config/           # 环境变量解析
-        ├── model/            # user/family_group/family_member/food_item/consumption_record/notification/recipe/stats
+        ├── model/            # user/family_group/family_member/food_item/consumption_record/disposal_application/notification/recipe/stats
         ├── repository/       # 按实体分文件
-        ├── service/          # 按实体分文件 + reminder_scheduler/notification_sender/stats
+        ├── service/          # 按实体分文件 + disposal_application + reminder_scheduler/notification_sender/stats
         ├── handler/          # 按实体分文件
-        ├── router/           # router.go + 按实体分文件
+        ├── router/           # router.go + 按实体分文件（含 disposal_applications.go）
         ├── middleware/       # auth/rbac/error_handler/rate_limiter/request_logger
         ├── dto/              # 请求/响应结构体
-        ├── constants/        # food/user/reminder/error_codes/log_templates/messages
+        ├── constants/        # food/disposal/user/reminder/error_codes/log_templates/messages
         └── util/             # jwt/logger/formatters/food_calculator/scheduler/app_error/response/pdf
 ```
 
@@ -140,6 +148,11 @@ ld-328/
 | PUT | `/api/v1/foods/:id` | 编辑食品 |
 | DELETE | `/api/v1/foods/:id` | 删除食品 |
 | POST | `/api/v1/foods/:id/consume` | 记录食品消耗 |
+| POST | `/api/v1/disposal-applications` | 提交临期处置申请（数量 + discard/eat/donate） |
+| GET | `/api/v1/disposal-applications` | 处置申请分页列表（`family_id`/`status`/`food_item_id`） |
+| GET | `/api/v1/disposal-applications/:id` | 处置申请详情 |
+| POST | `/api/v1/disposal-applications/:id/approve` | 家庭管理员批准（扣减余量、生成消耗记录、结案） |
+| POST | `/api/v1/disposal-applications/:id/reject` | 家庭管理员驳回（仅关闭申请） |
 | GET | `/api/v1/consumptions` | 家庭消耗记录分页列表 |
 | GET | `/api/v1/consumptions/analysis` | 消耗频率分析 |
 | GET | `/api/v1/notifications` | 通知列表 |
@@ -171,6 +184,11 @@ ld-328/
 
 - 后端：`backend/internal/constants/user.go`、`backend/internal/model/user.go`、`backend/internal/model/family_member.go`、`backend/internal/middleware/rbac.go`、`backend/internal/router/family_groups.go`、`backend/internal/service/family_group_service.go`、`backend/internal/util/formatters.go`、`backend/internal/constants/error_codes.go`
 - 前端：`frontend/src/constants/user.ts`、`frontend/src/stores/authStore.ts`、`frontend/src/router/guards.tsx`、`frontend/src/components/common/RoleGuard.tsx`、`frontend/src/pages/FamilyManage.tsx`
+
+### DisposalMethod / DisposalStatus（处置方式与申请状态：discard/eat/donate；pending/approved/rejected）
+
+- 后端：`backend/internal/constants/disposal.go`（定义）、`backend/internal/model/disposal_application.go`（模型）、`backend/internal/dto/disposal_dto.go`（校验）、`backend/internal/repository/disposal_application_repository.go`（条件抢占/列表）、`backend/internal/repository/food_item_repository.go`（批准扣减）、`backend/internal/service/disposal_application_service.go`（闭环状态机）、`backend/internal/handler/disposal_application_handler.go`、`backend/internal/router/disposal_applications.go`、`backend/internal/util/formatters.go`（中文文本）、`backend/internal/constants/log_templates.go`（日志）、`backend/internal/constants/messages.go`（文案）、`backend/internal/constants/error_codes.go`（错误码 1103-1106）、`cmd/server/main.go`（迁移 + pending 部分唯一索引）
+- 前端：`frontend/src/constants/food.ts`（定义）、`frontend/src/types/index.ts`（类型）、`frontend/src/api/disposal.ts`（接口）、`frontend/src/stores/disposalStore.ts`（列表缓存）、`frontend/src/pages/DisposalManage.tsx`（审批列表）、`frontend/src/pages/FoodManage.tsx`（提交入口）、`frontend/src/router/index.tsx`（路由）、`frontend/src/components/Shell.tsx`（菜单）
 
 ## License
 

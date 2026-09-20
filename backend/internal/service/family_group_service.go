@@ -168,6 +168,11 @@ func (s *FamilyGroupService) RemoveMember(ctx context.Context, familyID, operato
 	return nil
 }
 
+// RequireAdmin 校验操作人是家庭 Admin，返回其成员记录（供其他服务做家庭级授权）。
+func (s *FamilyGroupService) RequireAdmin(ctx context.Context, familyID, userID uint) (*model.FamilyMember, error) {
+	return s.requireAdmin(ctx, familyID, userID)
+}
+
 // requireAdmin 校验操作人是家庭 Admin。
 func (s *FamilyGroupService) requireAdmin(ctx context.Context, familyID, userID uint) (*model.FamilyMember, error) {
 	member, err := s.memberRepo.FindByFamilyAndUser(familyID, userID)

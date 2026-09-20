@@ -3,6 +3,7 @@ import Shell from '../components/Shell';
 import Login from '../pages/Login';
 import Dashboard from '../pages/Dashboard';
 import FoodManage from '../pages/FoodManage';
+import DisposalManage from '../pages/DisposalManage';
 import ConsumptionManage from '../pages/ConsumptionManage';
 import Statistics from '../pages/Statistics';
 import FamilyManage from '../pages/FamilyManage';
@@ -23,6 +24,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'foods', element: <FoodManage /> },
+      { path: 'disposals', element: <DisposalManage /> },
       { path: 'consumptions', element: <ConsumptionManage /> },
       { path: 'statistics', element: <Statistics /> },
       { path: 'family', element: <RequireAdmin><FamilyManage /></RequireAdmin> },
