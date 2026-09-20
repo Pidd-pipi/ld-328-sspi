@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Upload, message } from 'antd';
+import { useNavigate } from 'react-router-dom';
+import { Button, Card, Col, Drawer, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Upload, message } from 'antd';
 import { PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useFamilyStore } from '../stores/familyStore';
 import { consumeFood, createFood, deleteFood, getFoodDetail, importFoodsCSV, listFoods, updateFood } from '../api/foodItem';
+import { listDisposals } from '../api/disposal';
 import type { ConsumptionRecord, FoodItem } from '../types';
 import FreshnessBadge from '../components/common/FreshnessBadge';
 import RemainingDaysBar from '../components/common/RemainingDaysBar';
-import { FoodCategories, FoodCategoryLabels, StorageLocationLabels } from '../constants/food';
+import { DisposalStatus, FoodCategories, FoodCategoryLabels, FreshnessStatus, StorageLocationLabels } from '../constants/food';
+import { computeFreshness } from '../utils/calculateRemainingDays';
 import { formatDateTime } from '../utils/dateFormat';
 import { usePagination } from '../hooks/usePagination';
 import { useFoodStore } from '../stores/foodStore';
 
 export default function FoodManage() {
   const { currentFamily } = useFamilyStore();
+  const navigate = useNavigate();
   const { items, total, loading, fetchList } = useFoodStore();
   const { pagination, setTotal, onPageChange } = usePagination(1, 10);
   const [filters, setFilters] = useState({ category: '', status: '', storage_location: '', keyword: '' });
@@ -23,12 +27,24 @@ export default function FoodManage() {
   const [detail, setDetail] = useState<{ item: FoodItem; consumption_records: ConsumptionRecord[] } | null>(null);
   const [consumeQty, setConsumeQty] = useState(1);
   const [csvText, setCsvText] = useState('');
+  const [pendingDisposalIds, setPendingDisposalIds] = useState<Set<number>>(new Set());
+
+  const loadPendingDisposals = useCallback(async () => {
+    if (!currentFamily) return;
+    try {
+      const data = await listDisposals({ family_id: currentFamily.id, status: DisposalStatus.PENDING, page: 1, page_size: 200 });
+      setPendingDisposalIds(new Set(data.list.map((r) => r.food_item_id)));
+    } catch {
+      // 待处理标记加载失败不阻塞食品列表
+    }
+  }, [currentFamily]);
 
   const load = useCallback(async (page = pagination.page, size = pagination.pageSize) => {
     if (!currentFamily) return;
     const data = await fetchList({ family_id: currentFamily.id, page, page_size: size, ...filters });
     setTotal(data.total);
-  }, [currentFamily, filters, fetchList, pagination.page, pagination.pageSize, setTotal]);
+    loadPendingDisposals();
+  }, [currentFamily, filters, fetchList, pagination.page, pagination.pageSize, setTotal, loadPendingDisposals]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -68,13 +84,21 @@ export default function FoodManage() {
     { title: '类别', dataIndex: 'category', render: (v) => FoodCategoryLabels[v] ?? v },
     { title: '数量', render: (_, r) => `${r.quantity} ${r.unit}` },
     { title: '存放位置', dataIndex: 'storage_location', render: (v) => StorageLocationLabels[v] ?? v },
-    { title: '状态', render: (_, r) => <FreshnessBadge status={r.status} expiryDate={r.expiry_date} /> },
+    { title: '状态', render: (_, r) => (
+      <Space size={4}>
+        <FreshnessBadge status={r.status} expiryDate={r.expiry_date} />
+        {pendingDisposalIds.has(r.id) && <Tag color="processing">处置审批中</Tag>}
+      </Space>
+    ) },
     { title: '剩余', render: (_, r) => <RemainingDaysBar expiryDate={r.expiry_date} /> },
     { title: '操作', render: (_, r) => (
       <Space>
         <a onClick={() => getFoodDetail(r.id).then(setDetail)}>详情</a>
         <a onClick={() => { setEditing(r); form.setFieldsValue(r); setOpen(true); }}>编辑</a>
         <a onClick={() => { setDetail({ item: r, consumption_records: [] }); setConsumeQty(1); }}>消耗</a>
+        {canApplyDisposal(r) && !pendingDisposalIds.has(r.id) && (
+          <a onClick={() => navigate(`/disposals?food_id=${r.id}`)}>处置申请</a>
+        )}
         <a style={{ color: '#ff4d4f' }} onClick={() => Modal.confirm({ title: '确认删除？', onOk: () => onDelete(r) })}>删除</a>
       </Space>
     ) },
@@ -135,4 +159,11 @@ export default function FoodManage() {
       </Modal>
     </Space>
   );
+}
+
+// 仅临期/过期且未消耗、仍有余量的食品可提交处置申请（与后端 service 校验一致）
+function canApplyDisposal(item: FoodItem): boolean {
+  if (item.status === FreshnessStatus.CONSUMED || item.quantity <= 0) return false;
+  const fresh = computeFreshness(item.status, item.expiry_date);
+  return fresh === FreshnessStatus.EXPIRING || fresh === FreshnessStatus.EXPIRED;
 }

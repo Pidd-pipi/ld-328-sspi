@@ -54,6 +54,7 @@ func main() {
 	memberRepo := repository.NewFamilyMemberRepository(db)
 	foodRepo := repository.NewFoodItemRepository(db)
 	consumeRepo := repository.NewConsumptionRecordRepository(db)
+	disposalRepo := repository.NewDisposalRequestRepository(db)
 	notifyRepo := repository.NewNotificationRepository(db)
 	recipeRepo := repository.NewRecipeRepository(db)
 
@@ -62,6 +63,7 @@ func main() {
 	memberSvc := service.NewFamilyMemberService(memberRepo, log)
 	foodSvc := service.NewFoodItemService(foodRepo, consumeRepo, familySvc, calculator, log)
 	consumeSvc := service.NewConsumptionRecordService(consumeRepo, foodRepo, familySvc, log)
+	disposalSvc := service.NewDisposalRequestService(disposalRepo, foodRepo, consumeRepo, familySvc, calculator, log)
 	notifySvc := service.NewNotificationService(notifyRepo, familySvc, log)
 	recipeSvc := service.NewRecipeService(recipeRepo, foodRepo, familySvc, calculator, log)
 	statsSvc := service.NewStatsService(foodRepo, consumeRepo, notifyRepo, familySvc, memberSvc, calculator, log)
@@ -79,6 +81,7 @@ func main() {
 		FamilyGroup:  handler.NewFamilyGroupHandler(familySvc, memberSvc, log),
 		FoodItem:     handler.NewFoodItemHandler(foodSvc, consumeSvc, log),
 		Consumption:  handler.NewConsumptionRecordHandler(consumeSvc, log),
+		Disposal:     handler.NewDisposalRequestHandler(disposalSvc, log),
 		Notification: handler.NewNotificationHandler(notifySvc, log),
 		Recipe:       handler.NewRecipeHandler(recipeSvc, log),
 		Stats:        handler.NewStatsHandler(statsSvc, log),
@@ -105,14 +108,21 @@ func main() {
 }
 
 // migrateAndSeed 自动迁移并注入种子数据。
-// 若 database/init.sql 已建表（容器首次启动自动执行），则跳过 AutoMigrate，避免约束名冲突。
+// 若 database/init.sql 已建表（容器首次启动自动执行），则跳过基础表 AutoMigrate，避免约束名冲突；
+// 但新增业务表（如处置申请）仍需增量迁移，并补齐部分唯一索引。
 func migrateAndSeed(db *gorm.DB, log *slog.Logger) error {
 	var tableCount int64
 	if err := db.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='users'").Scan(&tableCount).Error; err != nil {
 		return err
 	}
+	if err := db.AutoMigrate(&model.DisposalRequest{}); err != nil {
+		return err
+	}
+	if err := createDisposalPendingIndex(db); err != nil {
+		return err
+	}
 	if tableCount > 0 {
-		return nil // init.sql 已初始化
+		return seedDisposalRequests(db, log) // init.sql 已初始化基础表，仅补充处置申请种子
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.FamilyGroup{}, &model.FamilyMember{},
@@ -167,6 +177,13 @@ func migrateAndSeed(db *gorm.DB, log *slog.Logger) error {
 	if err := db.Create(&model.ConsumptionRecord{FoodItemID: foods[1].ID, Quantity: 1, UserID: users[0].ID, ConsumedAt: now.Add(-24 * time.Hour)}).Error; err != nil {
 		return err
 	}
+	if err := db.Create(&model.DisposalRequest{
+		FamilyID: group.ID, FoodItemID: foods[3].ID, ApplicantID: users[1].ID,
+		Quantity: 1, Method: constants.DisposalMethodDiscard,
+		Reason: "已过期，申请丢弃", Status: constants.DisposalStatusPending,
+	}).Error; err != nil {
+		return err
+	}
 	if err := db.Create(&[]model.Notification{
 		{FamilyID: group.ID, FoodItemID: foods[0].ID, Type: constants.NotificationExpiring, Title: "食品临近过期", Content: "鲜牛奶 即将过期，请及时处理。", IsRead: false, SendAt: now},
 		{FamilyID: group.ID, FoodItemID: foods[3].ID, Type: constants.NotificationExpired, Title: "食品已过期", Content: "熟食卤味 已过期，请及时处理。", IsRead: false, SendAt: now},
@@ -187,3 +204,40 @@ func migrateAndSeed(db *gorm.DB, log *slog.Logger) error {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
+
+// createDisposalPendingIndex 创建部分唯一索引：同一食品至多一张待处理申请。
+// 并发提交时由数据库兜底拒绝重复申请（IF NOT EXISTS 保证可重复执行）。
+func createDisposalPendingIndex(db *gorm.DB) error {
+	return db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_disposal_pending_food
+		ON disposal_requests(food_item_id) WHERE status = 'pending'`).Error
+}
+
+// seedDisposalRequests 为 init.sql 初始化的环境补充一条待处理处置申请（已过期食品）。
+func seedDisposalRequests(db *gorm.DB, log *slog.Logger) error {
+	var count int64
+	if err := db.Model(&model.DisposalRequest{}).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	var food model.FoodItem
+	if err := db.Where("name = ? AND status <> ?", "熟食卤味", constants.FreshnessConsumed).First(&food).Error; err != nil {
+		log.Info(constants.LOG_DB_INITIALIZED, "disposal_seed", "skipped")
+		return nil
+	}
+	var member model.FamilyMember
+	if err := db.Where("family_id = ?", food.FamilyID).Order("joined_at desc").First(&member).Error; err != nil {
+		return err
+	}
+	req := model.DisposalRequest{
+		FamilyID: food.FamilyID, FoodItemID: food.ID, ApplicantID: member.UserID,
+		Quantity: food.Quantity, Method: constants.DisposalMethodDiscard,
+		Reason: "已过期，申请丢弃", Status: constants.DisposalStatusPending,
+	}
+	if err := db.Create(&req).Error; err != nil {
+		return err
+	}
+	log.Info(constants.LOG_DB_INITIALIZED, "disposal_seed", "ok")
+	return nil
+}

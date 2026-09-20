@@ -82,3 +82,24 @@ export interface PageData<T> {
   page: number;
   page_size: number;
 }
+
+export interface DisposalRequest {
+  id: number;
+  family_id: number;
+  food_item_id: number;
+  applicant_id: number;
+  quantity: number;
+  method: string;
+  reason: string;
+  status: string;
+  reviewer_id?: number | null;
+  review_remark: string;
+  consumption_record_id?: number | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  food_item?: FoodItem;
+  applicant?: User;
+  reviewer?: User | null;
+  consumption_record?: ConsumptionRecord | null;
+}

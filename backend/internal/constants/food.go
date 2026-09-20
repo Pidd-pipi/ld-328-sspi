@@ -43,3 +43,23 @@ const (
 
 // StorageLocationList 全部存放位置。
 var StorageLocationList = []string{StorageFridge, StoragePantry, StorageFreezer, StorageCounter, StorageOtherLoc}
+
+// DisposalMethod 临期处置方式枚举：前端 constants/food.ts 与后端 constants/food.go 必须保持一致。
+const (
+	DisposalMethodDiscard = "discard" // 丢弃
+	DisposalMethodConsume = "consume" // 食用
+	DisposalMethodDonate  = "donate"  // 捐赠
+)
+
+// DisposalMethods 全部临期处置方式（申请表单/审批/日志共用）。
+var DisposalMethods = []string{DisposalMethodDiscard, DisposalMethodConsume, DisposalMethodDonate}
+
+// DisposalStatus 处置申请状态枚举。
+const (
+	DisposalStatusPending  = "pending"  // 待处理
+	DisposalStatusApproved = "approved" // 已批准
+	DisposalStatusRejected = "rejected" // 已驳回
+)
+
+// DisposalStatuses 全部处置申请状态。
+var DisposalStatuses = []string{DisposalStatusPending, DisposalStatusApproved, DisposalStatusRejected}

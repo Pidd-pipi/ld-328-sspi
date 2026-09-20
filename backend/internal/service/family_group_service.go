@@ -190,3 +190,20 @@ func (s *FamilyGroupService) IsMember(ctx context.Context, familyID, userID uint
 	}
 	return nil
 }
+
+// RequireAdmin 校验操作人是家庭 Admin（供其他实体的服务层复用）。
+func (s *FamilyGroupService) RequireAdmin(ctx context.Context, familyID, userID uint) (*model.FamilyMember, error) {
+	return s.requireAdmin(ctx, familyID, userID)
+}
+
+// GetMember 查询用户在家庭中的成员记录（不存在返回错误）。
+func (s *FamilyGroupService) GetMember(ctx context.Context, familyID, userID uint) (*model.FamilyMember, error) {
+	member, err := s.memberRepo.FindByFamilyAndUser(familyID, userID)
+	if err != nil {
+		if errors.Is(err, util.ErrNotFound) {
+			return nil, util.ForbiddenError(constants.MsgNotFamilyMember, err)
+		}
+		return nil, util.LogError(s.log, ctx, constants.LOG_FAMILY_MEMBER_ROLE_CHANGED, fmt.Errorf("find member: %w", err))
+	}
+	return member, nil
+}

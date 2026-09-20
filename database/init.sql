@@ -63,6 +63,32 @@ CREATE TABLE IF NOT EXISTS consumption_records (
 );
 CREATE INDEX IF NOT EXISTS idx_consume_food ON consumption_records(food_item_id);
 
+CREATE TABLE IF NOT EXISTS disposal_requests (
+    id BIGSERIAL PRIMARY KEY,
+    family_id BIGINT NOT NULL,
+    food_item_id BIGINT NOT NULL,
+    applicant_id BIGINT NOT NULL,
+    quantity DOUBLE PRECISION NOT NULL,
+    method VARCHAR(20) NOT NULL,
+    reason VARCHAR(255) DEFAULT '',
+    status VARCHAR(20) DEFAULT 'pending',
+    reviewer_id BIGINT,
+    review_remark VARCHAR(255) DEFAULT '',
+    consumption_record_id BIGINT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT fk_disposal_family FOREIGN KEY (family_id) REFERENCES family_groups(id),
+    CONSTRAINT fk_disposal_food FOREIGN KEY (food_item_id) REFERENCES food_items(id),
+    CONSTRAINT fk_disposal_applicant FOREIGN KEY (applicant_id) REFERENCES users(id),
+    CONSTRAINT fk_disposal_reviewer FOREIGN KEY (reviewer_id) REFERENCES users(id),
+    CONSTRAINT fk_disposal_consumption FOREIGN KEY (consumption_record_id) REFERENCES consumption_records(id)
+);
+CREATE INDEX IF NOT EXISTS idx_disposal_family ON disposal_requests(family_id, status);
+-- 同一食品只允许存在一张待处理（pending）申请
+CREATE UNIQUE INDEX IF NOT EXISTS uq_disposal_pending_food
+    ON disposal_requests(food_item_id) WHERE status = 'pending';
+
 CREATE TABLE IF NOT EXISTS notifications (
     id BIGSERIAL PRIMARY KEY,
     family_id BIGINT NOT NULL,
@@ -124,6 +150,15 @@ CROSS JOIN (VALUES
 ) AS n(food_name, type, title, content)
 JOIN food_items fi ON fi.family_id = g.id AND fi.name = n.food_name
 WHERE g.invite_code='FAMILY01'
+ON CONFLICT DO NOTHING;
+
+-- 一条待处理的临期处置申请（家庭成员对已过期食品申请丢弃）
+INSERT INTO disposal_requests (family_id, food_item_id, applicant_id, quantity, method, reason, status)
+SELECT g.id, fi.id, um.id, fi.quantity, 'discard', '已过期，申请丢弃', 'pending'
+FROM family_groups g
+JOIN food_items fi ON fi.family_id = g.id AND fi.name = '熟食卤味'
+JOIN users um ON um.phone = '13800000002'
+WHERE g.invite_code = 'FAMILY01'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO recipes (name, ingredients, description, suitable_category) VALUES

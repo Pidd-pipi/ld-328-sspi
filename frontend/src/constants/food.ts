@@ -47,3 +47,40 @@ export const StorageLocationLabels: Record<string, string> = {
   counter: '台面',
   other: '其他',
 };
+
+// 临期处置方式：与 backend/internal/constants/food.go 保持一致
+export const DisposalMethod = {
+  DISCARD: 'discard',
+  CONSUME: 'consume',
+  DONATE: 'donate',
+} as const;
+export type DisposalMethodValue = typeof DisposalMethod[keyof typeof DisposalMethod];
+
+export const DisposalMethods: string[] = [
+  DisposalMethod.DISCARD, DisposalMethod.CONSUME, DisposalMethod.DONATE,
+];
+
+export const DisposalMethodLabels: Record<string, string> = {
+  [DisposalMethod.DISCARD]: '丢弃',
+  [DisposalMethod.CONSUME]: '食用',
+  [DisposalMethod.DONATE]: '捐赠',
+};
+
+// 处置申请状态
+export const DisposalStatus = {
+  PENDING: 'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+} as const;
+export type DisposalStatusValue = typeof DisposalStatus[keyof typeof DisposalStatus];
+
+export const DisposalStatusLabels: Record<string, string> = {
+  [DisposalStatus.PENDING]: '待处理',
+  [DisposalStatus.APPROVED]: '已批准',
+  [DisposalStatus.REJECTED]: '已驳回',
+};
+
+// 可提交处置申请的食品新鲜度状态：仅临期、过期
+export const DisposalEligibleStatuses: string[] = [
+  FreshnessStatus.EXPIRING, FreshnessStatus.EXPIRED,
+];

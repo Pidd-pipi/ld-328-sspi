@@ -12,13 +12,14 @@ import (
 
 // Handlers 全部接口处理器集合。
 type Handlers struct {
-	User          *handler.UserHandler
-	FamilyGroup   *handler.FamilyGroupHandler
-	FoodItem      *handler.FoodItemHandler
-	Consumption   *handler.ConsumptionRecordHandler
-	Notification  *handler.NotificationHandler
-	Recipe        *handler.RecipeHandler
-	Stats         *handler.StatsHandler
+	User         *handler.UserHandler
+	FamilyGroup  *handler.FamilyGroupHandler
+	FoodItem     *handler.FoodItemHandler
+	Consumption  *handler.ConsumptionRecordHandler
+	Disposal     *handler.DisposalRequestHandler
+	Notification *handler.NotificationHandler
+	Recipe       *handler.RecipeHandler
+	Stats        *handler.StatsHandler
 }
 
 // New 装配 Gin 路由。
@@ -52,6 +53,7 @@ func New(cfg config.Config, log *slog.Logger, h Handlers, limiter *middleware.Ra
 	registerFamilyRoutes(authed, h)
 	registerFoodRoutes(authed, h)
 	registerConsumptionRoutes(authed, h)
+	registerDisposalRoutes(authed, h)
 	registerNotificationRoutes(authed, h)
 	registerRecipeRoutes(authed, h)
 	registerStatsRoutes(authed, h)

@@ -2,7 +2,7 @@
 
 > 项目类型：全栈 Web 应用（农业与生活服务）
 
-面向家庭和小型餐饮的食品保质期管理工具，帮助用户记录食品入库信息、自动计算保质期剩余天数、及时提醒临期食品，减少食物浪费。支持家庭多成员共享、消耗记录、分类统计报表与智能食谱推荐。
+面向家庭和小型餐饮的食品保质期管理工具，帮助用户记录食品入库信息、自动计算保质期剩余天数、及时提醒临期食品，减少食物浪费。支持家庭多成员共享、消耗记录、分类统计报表、智能食谱推荐，以及临期/过期食品的处置申请审批闭环（提交数量与丢弃/食用/捐赠方式，家庭管理员批准后扣减余量并生成消耗记录）。
 
 ## 快速启动（Docker Compose 一键部署，首选）
 
@@ -68,11 +68,11 @@ ld-328/
 │   ├── Dockerfile            # Node 构建 + Nginx 托管
 │   ├── nginx.conf            # SPA 路由 + /api 反代到 backend:8080
 │   └── src/
-│       ├── api/              # user/family/foodItem/consumption/notification/recipe/stats
+│       ├── api/              # user/family/foodItem/disposal/consumption/notification/recipe/stats
 │       ├── stores/           # authStore/userStore/familyStore/foodStore/notificationStore
-│       ├── components/common/# FreshnessBadge/RemainingDaysBar/FoodCard/MemberAvatar/EmptyState/RoleGuard/ErrorBoundary
-│       ├── hooks/            # useFreshnessStats/usePagination
-│       ├── pages/            # Dashboard/FoodManage/ConsumptionManage/Statistics/FamilyManage/Recommendations/Profile/Login
+│       ├── components/common/# FreshnessBadge/RemainingDaysBar/FoodCard/MemberAvatar/EmptyState/RoleGuard/ErrorBoundary/DisposalStatusBadge
+│       ├── hooks/            # useFreshnessStats/usePagination/useFamilyRole
+│       ├── pages/            # Dashboard/FoodManage/DisposalManage/ConsumptionManage/Statistics/FamilyManage/Recommendations/Profile/Login
 │       ├── router/           # index.tsx + guards.tsx
 │       ├── utils/            # calculateRemainingDays/dateFormat/request
 │       └── constants/        # food/user/errorCodes
@@ -80,7 +80,7 @@ ld-328/
     ├── cmd/server/main.go    # 入口：装配依赖、启动 Gin 与临期扫描
     └── internal/
         ├── config/           # 环境变量解析
-        ├── model/            # user/family_group/family_member/food_item/consumption_record/notification/recipe/stats
+        ├── model/            # user/family_group/family_member/food_item/disposal_request/consumption_record/notification/recipe/stats
         ├── repository/       # 按实体分文件
         ├── service/          # 按实体分文件 + reminder_scheduler/notification_sender/stats
         ├── handler/          # 按实体分文件
@@ -140,6 +140,11 @@ ld-328/
 | PUT | `/api/v1/foods/:id` | 编辑食品 |
 | DELETE | `/api/v1/foods/:id` | 删除食品 |
 | POST | `/api/v1/foods/:id/consume` | 记录食品消耗 |
+| POST | `/api/v1/disposals` | 提交临期处置申请（数量 + 丢弃/食用/捐赠） |
+| GET | `/api/v1/disposals` | 处置申请列表（可按 status/food_item_id 筛选） |
+| GET | `/api/v1/disposals/:id` | 处置申请详情 |
+| POST | `/api/v1/disposals/:id/approve` | 批准申请（仅家庭管理员，扣减余量+生成消耗记录+结案） |
+| POST | `/api/v1/disposals/:id/reject` | 驳回申请（仅家庭管理员，只关闭申请，不改库存） |
 | GET | `/api/v1/consumptions` | 家庭消耗记录分页列表 |
 | GET | `/api/v1/consumptions/analysis` | 消耗频率分析 |
 | GET | `/api/v1/notifications` | 通知列表 |
@@ -165,7 +170,17 @@ ld-328/
 ### FreshnessStatus（新鲜度状态：fresh/expiring/expired/consumed）
 
 - 后端：`backend/internal/constants/food.go`（定义）、`backend/internal/model/food_item.go`（模型）、`backend/internal/service/food_item_service.go`（状态机）、`backend/internal/service/reminder_service.go`（扫描状态流转）、`backend/internal/util/food_calculator.go`（计算）、`backend/internal/util/formatters.go`（状态文本）、`backend/internal/constants/log_templates.go`（日志）、`backend/internal/constants/error_codes.go`（错误码）、`backend/internal/repository/food_item_repository.go`（查询）、`backend/internal/service/stats_service.go`（看板分组）
-- 前端：`frontend/src/constants/food.ts`（定义）、`frontend/src/types/index.ts`（类型）、`frontend/src/components/common/FreshnessBadge.tsx`（着色）、`frontend/src/components/common/RemainingDaysBar.tsx`（进度条）、`frontend/src/components/common/FoodCard.tsx`（展示）、`frontend/src/hooks/useFreshnessStats.ts`（统计）、`frontend/src/utils/calculateRemainingDays.ts`（计算）、`frontend/src/pages/Dashboard.tsx`（看板着色）、`frontend/src/pages/FoodManage.tsx`（筛选）、`frontend/src/pages/Statistics.tsx`（浪费统计）
+- 前端：`frontend/src/constants/food.ts`（定义）、`frontend/src/types/index.ts`（类型）、`frontend/src/components/common/FreshnessBadge.tsx`（着色）、`frontend/src/components/common/RemainingDaysBar.tsx`（进度条）、`frontend/src/components/common/FoodCard.tsx`（展示）、`frontend/src/hooks/useFreshnessStats.ts`（统计）、`frontend/src/utils/calculateRemainingDays.ts`（计算）、`frontend/src/pages/Dashboard.tsx`（看板着色）、`frontend/src/pages/FoodManage.tsx`（筛选/处置入口）、`frontend/src/pages/DisposalManage.tsx`（处置申请资格）、`frontend/src/pages/Statistics.tsx`（浪费统计）
+
+### DisposalMethod（处置方式：discard/consume/donate）
+
+- 后端：`backend/internal/constants/food.go`（定义）、`backend/internal/model/disposal_request.go`（模型常量）、`backend/internal/dto/disposal_dto.go`（oneof 校验）、`backend/internal/service/disposal_request_service.go`（业务校验）、`backend/internal/util/formatters.go`（方式文本）、`backend/internal/constants/log_templates.go`（日志）、`backend/internal/constants/messages.go`（文案）
+- 前端：`frontend/src/constants/food.ts`（定义/标签）、`frontend/src/types/index.ts`（类型）、`frontend/src/api/disposal.ts`（请求）、`frontend/src/pages/DisposalManage.tsx`（表单/列表）
+
+### DisposalStatus（处置申请状态：pending/approved/rejected）
+
+- 后端：`backend/internal/constants/food.go`（定义）、`backend/internal/model/disposal_request.go`（模型）、`backend/internal/repository/disposal_request_repository.go`（CAS 结案）、`backend/internal/service/disposal_request_service.go`（状态流转）、`backend/internal/util/formatters.go`（状态文本）、`backend/internal/constants/error_codes.go`（1110-1113）、`database/init.sql`（部分唯一索引 `uq_disposal_pending_food`）
+- 前端：`frontend/src/constants/food.ts`（定义/标签）、`frontend/src/types/index.ts`（类型）、`frontend/src/components/common/DisposalStatusBadge.tsx`（徽标）、`frontend/src/api/disposal.ts`（请求）、`frontend/src/pages/DisposalManage.tsx`（待处理/全部 Tab）、`frontend/src/pages/FoodManage.tsx`（审批中标记）
 
 ### UserRole（用户角色：admin/member）
 

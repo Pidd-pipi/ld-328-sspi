@@ -6,6 +6,7 @@ import (
 	"github.com/blueship581/cyfreshfood/internal/model"
 	"github.com/blueship581/cyfreshfood/internal/util"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // FoodItemRepository 食品仓储。
@@ -77,6 +78,37 @@ func (r *FoodItemRepository) ListByStatus(familyID uint, statuses []string) ([]m
 
 // Update 更新食品。
 func (r *FoodItemRepository) Update(item *model.FoodItem) error { return r.db.Save(item).Error }
+
+// FindByIDForUpdate 按 ID 查询并加行锁（PostgreSQL 使用 FOR UPDATE），必须在事务内调用。
+// SQLite 等不支持行锁的方言退化为普通查询（测试环境），并发安全仍由条件更新 + CAS 兜底。
+func (r *FoodItemRepository) FindByIDForUpdate(id uint) (*model.FoodItem, error) {
+	var item model.FoodItem
+	query := r.db
+	if r.db.Dialector.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(&item, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, util.ErrNotFound
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// DeductQuantity 条件原子扣减：余量充足且未消耗时生效，返回受影响行数。
+// 作为行锁校验之外的第二道防线，失败（0 行）意味着超量或已消耗，调用方必须回滚整单。
+// 扣减后余量为 0 时自动置为 consumed；updatedAt 由调用方传入以保证跨方言一致。
+func (r *FoodItemRepository) DeductQuantity(id uint, quantity float64, updatedAt interface{}) (int64, error) {
+	res := r.db.Model(&model.FoodItem{}).
+		Where("id = ? AND status <> ? AND quantity >= ?", id, "consumed", quantity).
+		Updates(map[string]interface{}{
+			"quantity":   gorm.Expr("quantity - ?", quantity),
+			"status":     gorm.Expr("CASE WHEN quantity - ? <= 0 THEN ? ELSE status END", quantity, "consumed"),
+			"updated_at": updatedAt,
+		})
+	return res.RowsAffected, res.Error
+}
 
 // UpdateStatus 更新新鲜度状态。
 func (r *FoodItemRepository) UpdateStatus(id uint, status string) error {
